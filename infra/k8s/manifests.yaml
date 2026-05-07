@@ -1,0 +1,203 @@
+---
+# Namespace
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: llm-eval
+
+---
+# ConfigMap
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: llm-eval-config
+  namespace: llm-eval
+data:
+  eval_config.yaml: |
+    model:
+      target: "gemini-2.5-flash-preview-05-20"
+      judge: "gemini-2.5-flash-preview-05-20"
+    api:
+      requests_per_minute: 10
+      daily_token_budget: 900000
+
+---
+# Secret (populate with real values)
+apiVersion: v1
+kind: Secret
+metadata:
+  name: llm-eval-secrets
+  namespace: llm-eval
+type: Opaque
+stringData:
+  GOOGLE_API_KEY: "your-key-here"
+  POSTGRES_PASSWORD: "your-db-password"
+
+---
+# API Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: llm-eval-api
+  namespace: llm-eval
+  labels:
+    app: llm-eval-api
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: llm-eval-api
+  template:
+    metadata:
+      labels:
+        app: llm-eval-api
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8000"
+        prometheus.io/path: "/metrics"
+    spec:
+      containers:
+        - name: api
+          image: llm-eval:latest
+          ports:
+            - containerPort: 8000
+          env:
+            - name: GOOGLE_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: llm-eval-secrets
+                  key: GOOGLE_API_KEY
+          resources:
+            requests:
+              memory: "512Mi"
+              cpu: "250m"
+            limits:
+              memory: "2Gi"
+              cpu: "1000m"
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 30
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 60
+            periodSeconds: 30
+          volumeMounts:
+            - name: eval-data
+              mountPath: /app/data
+      volumes:
+        - name: eval-data
+          persistentVolumeClaim:
+            claimName: llm-eval-pvc
+
+---
+# Worker Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: llm-eval-worker
+  namespace: llm-eval
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: llm-eval-worker
+  template:
+    metadata:
+      labels:
+        app: llm-eval-worker
+    spec:
+      containers:
+        - name: worker
+          image: llm-eval:latest
+          command: ["celery", "-A", "modules.distributed_eval", "worker", "--concurrency=4"]
+          env:
+            - name: GOOGLE_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: llm-eval-secrets
+                  key: GOOGLE_API_KEY
+          resources:
+            requests:
+              memory: "1Gi"
+              cpu: "500m"
+            limits:
+              memory: "4Gi"
+              cpu: "2000m"
+
+---
+# API Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: llm-eval-api-svc
+  namespace: llm-eval
+spec:
+  selector:
+    app: llm-eval-api
+  ports:
+    - port: 80
+      targetPort: 8000
+  type: ClusterIP
+
+---
+# Ingress
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: llm-eval-ingress
+  namespace: llm-eval
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /
+spec:
+  rules:
+    - host: llm-eval.your-domain.com
+      http:
+        paths:
+          - path: /api
+            pathType: Prefix
+            backend:
+              service:
+                name: llm-eval-api-svc
+                port:
+                  number: 80
+
+---
+# HPA - Autoscaling
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: llm-eval-worker-hpa
+  namespace: llm-eval
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: llm-eval-worker
+  minReplicas: 2
+  maxReplicas: 10
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+
+---
+# PersistentVolumeClaim
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: llm-eval-pvc
+  namespace: llm-eval
+spec:
+  accessModes:
+    - ReadWriteMany
+  resources:
+    requests:
+      storage: 20Gi

@@ -1,0 +1,983 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>LLM Eval Platform</title>
+  <script src="https://cdn.jsdelivr.net/npm/echarts@5.5.1/dist/echarts.min.js"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --bg: #050810; --bg2: #0A0E1A; --bg3: #111827;
+      --border: rgba(255,255,255,0.07); --border2: rgba(0,255,179,0.2);
+      --green: #00FFB3; --blue: #00C8FF; --red: #FF4466;
+      --orange: #FF6B35; --yellow: #FFB800; --purple: #A78BFA;
+      --text: #E8EAF0; --muted: #888; --font: 'Courier New', monospace;
+    }
+    body { background: var(--bg); color: var(--text); font-family: var(--font); min-height: 100vh; }
+
+    /* Grid bg */
+    body::before {
+      content: ''; position: fixed; inset: 0; z-index: 0; pointer-events: none;
+      background-image: linear-gradient(rgba(0,255,179,0.03) 1px, transparent 1px),
+                        linear-gradient(90deg, rgba(0,255,179,0.03) 1px, transparent 1px);
+      background-size: 40px 40px;
+    }
+
+    .layout { display: flex; min-height: 100vh; position: relative; z-index: 1; }
+
+    /* Sidebar */
+    .sidebar {
+      width: 220px; background: var(--bg2); border-right: 1px solid var(--border);
+      display: flex; flex-direction: column; padding: 20px 0; flex-shrink: 0;
+    }
+    .logo { padding: 0 20px 24px; border-bottom: 1px solid var(--border); margin-bottom: 12px; }
+    .logo-title { font-size: 11px; letter-spacing: 3px; color: var(--green); font-weight: 700; }
+    .logo-sub { font-size: 9px; color: var(--muted); letter-spacing: 1px; margin-top: 4px; }
+    .nav-item {
+      display: flex; align-items: center; gap: 10px; padding: 10px 20px;
+      font-size: 11px; letter-spacing: 1.5px; color: var(--muted); cursor: pointer;
+      border-left: 2px solid transparent; transition: all 0.15s;
+    }
+    .nav-item:hover { color: var(--text); background: rgba(255,255,255,0.03); }
+    .nav-item.active { color: var(--green); border-left-color: var(--green); background: rgba(0,255,179,0.05); }
+    .nav-icon { font-size: 14px; width: 18px; }
+    .sidebar-bottom { margin-top: auto; padding: 16px 20px; border-top: 1px solid var(--border); }
+    .status-dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--green); margin-right: 6px; animation: pulse 2s infinite; }
+    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
+
+    /* Main */
+    .main { flex: 1; overflow-y: auto; }
+    .topbar {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 16px 32px; border-bottom: 1px solid var(--border);
+      background: rgba(10,14,26,0.95); position: sticky; top: 0; z-index: 10;
+    }
+    .topbar-title { font-size: 13px; font-weight: 700; color: var(--text); letter-spacing: 2px; }
+    .topbar-right { display: flex; align-items: center; gap: 16px; }
+    .badge {
+      font-size: 9px; letter-spacing: 1px; padding: 3px 10px; border-radius: 2px; font-weight: 700;
+    }
+    .badge-green { background: rgba(0,255,179,0.15); color: var(--green); border: 1px solid rgba(0,255,179,0.3); }
+    .badge-red { background: rgba(255,68,102,0.15); color: var(--red); border: 1px solid rgba(255,68,102,0.3); }
+    .badge-yellow { background: rgba(255,184,0,0.15); color: var(--yellow); border: 1px solid rgba(255,184,0,0.3); }
+    .run-select {
+      background: var(--bg3); border: 1px solid var(--border2); color: var(--green);
+      font-size: 11px; padding: 6px 12px; border-radius: 2px; font-family: var(--font); cursor: pointer;
+    }
+
+    .content { padding: 28px 32px; }
+    .page { display: none; }
+    .page.active { display: block; }
+
+    /* Section headers */
+    .section-header { font-size: 11px; letter-spacing: 3px; color: var(--green); opacity: 0.7; margin-bottom: 4px; }
+    .section-title { font-size: 14px; font-weight: 700; letter-spacing: 2px; color: var(--text); text-transform: uppercase; }
+    .section-divider { height: 1px; background: rgba(0,255,179,0.15); margin: 8px 0 20px; }
+
+    /* KPI Cards */
+    .kpi-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 14px; margin-bottom: 28px; }
+    .kpi-card {
+      background: var(--bg2); border: 1px solid var(--border); border-radius: 4px; padding: 16px;
+      position: relative; overflow: hidden;
+    }
+    .kpi-card::before {
+      content: ''; position: absolute; top: 0; left: 0; right: 0; height: 2px;
+    }
+    .kpi-card.green::before { background: var(--green); }
+    .kpi-card.red::before { background: var(--red); }
+    .kpi-card.blue::before { background: var(--blue); }
+    .kpi-card.yellow::before { background: var(--yellow); }
+    .kpi-card.purple::before { background: var(--purple); }
+    .kpi-card.orange::before { background: var(--orange); }
+    .kpi-label { font-size: 9px; letter-spacing: 2px; color: var(--muted); margin-bottom: 8px; }
+    .kpi-value { font-size: 26px; font-weight: 900; }
+    .kpi-card.green .kpi-value { color: var(--green); }
+    .kpi-card.red .kpi-value { color: var(--red); }
+    .kpi-card.blue .kpi-value { color: var(--blue); }
+    .kpi-card.yellow .kpi-value { color: var(--yellow); }
+    .kpi-card.purple .kpi-value { color: var(--purple); }
+    .kpi-card.orange .kpi-value { color: var(--orange); }
+    .kpi-sub { font-size: 10px; color: var(--muted); margin-top: 4px; }
+    .kpi-ci { font-size: 9px; color: var(--muted); margin-top: 2px; }
+
+    /* Charts */
+    .chart-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(380px, 1fr)); gap: 16px; margin-bottom: 24px; }
+    .chart-card {
+      background: var(--bg2); border: 1px solid var(--border); border-radius: 4px; padding: 20px;
+    }
+    .chart-title { font-size: 11px; letter-spacing: 2px; color: var(--muted); margin-bottom: 16px; }
+    .chart-body { height: 260px; }
+
+    /* Table */
+    .table-card { background: var(--bg2); border: 1px solid var(--border); border-radius: 4px; margin-bottom: 24px; overflow: hidden; }
+    .table-header { padding: 14px 20px; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; }
+    .table-title { font-size: 11px; letter-spacing: 2px; color: var(--muted); }
+    .table-wrap { overflow-x: auto; }
+    table { width: 100%; border-collapse: collapse; font-size: 11px; }
+    th { padding: 10px 16px; text-align: left; font-size: 9px; letter-spacing: 2px; color: var(--muted); border-bottom: 1px solid var(--border); background: rgba(255,255,255,0.02); }
+    td { padding: 10px 16px; border-bottom: 1px solid rgba(255,255,255,0.03); color: #ccc; }
+    tr:last-child td { border-bottom: none; }
+    tr:hover td { background: rgba(255,255,255,0.02); }
+
+    /* Violation banner */
+    .violation-banner { background: rgba(255,68,102,0.08); border: 1px solid rgba(255,68,102,0.3); border-radius: 4px; padding: 14px 20px; margin-bottom: 20px; }
+    .violation-title { font-size: 11px; font-weight: 700; color: var(--red); letter-spacing: 1px; margin-bottom: 8px; }
+    .violation-item { font-size: 11px; color: #ddd; padding: 3px 0; }
+
+    /* Provider status */
+    .provider-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; margin-bottom: 24px; }
+    .provider-card { background: var(--bg2); border: 1px solid var(--border); border-radius: 4px; padding: 12px; }
+    .provider-name { font-size: 11px; color: var(--text); font-weight: 700; margin-bottom: 4px; }
+    .provider-status { font-size: 9px; letter-spacing: 1px; }
+    .status-ok { color: var(--green); }
+    .status-open { color: var(--red); }
+    .status-half { color: var(--yellow); }
+
+    /* Attack heatmap cell */
+    .heatmap-grid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 3px; margin-top: 12px; }
+    .heat-cell {
+      height: 36px; border-radius: 2px; display: flex; align-items: center; justify-content: center;
+      font-size: 9px; font-weight: 700; cursor: pointer; transition: opacity 0.15s;
+    }
+    .heat-cell:hover { opacity: 0.8; }
+
+    /* Live feed */
+    .live-feed { background: var(--bg2); border: 1px solid var(--border); border-radius: 4px; padding: 16px; max-height: 280px; overflow-y: auto; }
+    .feed-item { display: flex; gap: 12px; padding: 6px 0; border-bottom: 1px solid rgba(255,255,255,0.04); font-size: 11px; }
+    .feed-time { color: var(--muted); min-width: 80px; }
+    .feed-text { color: #ccc; flex: 1; }
+    .feed-badge { font-size: 9px; padding: 1px 6px; border-radius: 2px; }
+
+    /* Buttons */
+    .btn {
+      background: transparent; border: 1px solid var(--border2); color: var(--green);
+      padding: 6px 16px; font-size: 10px; letter-spacing: 1.5px; cursor: pointer;
+      border-radius: 2px; font-family: var(--font); transition: all 0.15s;
+    }
+    .btn:hover { background: rgba(0,255,179,0.1); }
+    .btn-danger { border-color: rgba(255,68,102,0.4); color: var(--red); }
+    .btn-danger:hover { background: rgba(255,68,102,0.1); }
+
+    /* Progress bar */
+    .progress-bar { background: var(--bg3); border-radius: 2px; height: 4px; overflow: hidden; }
+    .progress-fill { height: 100%; border-radius: 2px; transition: width 0.5s; }
+
+    /* Tabs */
+    .tabs { display: flex; gap: 4px; margin-bottom: 20px; flex-wrap: wrap; }
+    .tab { padding: 5px 14px; font-size: 10px; letter-spacing: 1.5px; cursor: pointer; border-radius: 2px; border: 1px solid var(--border); color: var(--muted); background: transparent; font-family: var(--font); transition: all 0.15s; }
+    .tab.active { border-color: rgba(0,255,179,0.5); color: var(--green); background: rgba(0,255,179,0.08); }
+
+    /* Sub-tabs content */
+    .subtab-content { display: none; }
+    .subtab-content.active { display: block; }
+
+    /* Responsive */
+    @media (max-width: 768px) {
+      .sidebar { display: none; }
+      .content { padding: 16px; }
+      .chart-grid { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+<div class="layout">
+
+  <!-- Sidebar -->
+  <aside class="sidebar">
+    <div class="logo">
+      <div class="logo-title">LLM EVAL</div>
+      <div class="logo-sub">PLATFORM v2.0</div>
+    </div>
+    <nav>
+      <div class="nav-item active" onclick="showPage('overview')">
+        <span class="nav-icon">◈</span>OVERVIEW
+      </div>
+      <div class="nav-item" onclick="showPage('metrics')">
+        <span class="nav-icon">◆</span>METRICS
+      </div>
+      <div class="nav-item" onclick="showPage('redteam')">
+        <span class="nav-icon">⚔</span>RED-TEAM
+      </div>
+      <div class="nav-item" onclick="showPage('benchmarks')">
+        <span class="nav-icon">📊</span>BENCHMARKS
+      </div>
+      <div class="nav-item" onclick="showPage('rag')">
+        <span class="nav-icon">🔗</span>RAG EVAL
+      </div>
+      <div class="nav-item" onclick="showPage('providers')">
+        <span class="nav-icon">⚡</span>PROVIDERS
+      </div>
+      <div class="nav-item" onclick="showPage('observability')">
+        <span class="nav-icon">👁</span>OBSERVABILITY
+      </div>
+      <div class="nav-item" onclick="showPage('cost')">
+        <span class="nav-icon">💰</span>COST INTEL
+      </div>
+      <div class="nav-item" onclick="showPage('security')">
+        <span class="nav-icon">🔒</span>SECURITY
+      </div>
+      <div class="nav-item" onclick="showPage('jobs')">
+        <span class="nav-icon">⚙</span>JOBS
+      </div>
+    </nav>
+    <div class="sidebar-bottom">
+      <div style="font-size:10px;color:var(--muted)">
+        <span class="status-dot"></span>API CONNECTED
+      </div>
+      <div style="font-size:9px;color:var(--muted);margin-top:6px" id="ws-status">WS: CONNECTING</div>
+    </div>
+  </aside>
+
+  <!-- Main -->
+  <main class="main">
+    <div class="topbar">
+      <div class="topbar-title">AI EVALUATION & OBSERVABILITY PLATFORM</div>
+      <div class="topbar-right">
+        <select class="run-select" id="run-select" onchange="loadRun(this.value)">
+          <option value="">Select Run...</option>
+        </select>
+        <span class="badge badge-green" id="api-badge">API OK</span>
+        <button class="btn" onclick="refreshAll()">↻ REFRESH</button>
+        <button class="btn" onclick="submitJob()">▶ RUN EVAL</button>
+      </div>
+    </div>
+
+    <div class="content">
+
+      <!-- OVERVIEW PAGE -->
+      <div class="page active" id="page-overview">
+        <div class="section-header">◆</div>
+        <div class="section-title">Platform Overview</div>
+        <div class="section-divider"></div>
+
+        <div id="violation-banner" style="display:none" class="violation-banner">
+          <div class="violation-title" id="violation-title">⚠ THRESHOLD VIOLATIONS</div>
+          <div id="violation-list"></div>
+        </div>
+
+        <div class="kpi-grid" id="kpi-grid">
+          <!-- Populated by JS -->
+          <div class="kpi-card green"><div class="kpi-label">RELEVANCE</div><div class="kpi-value">—</div><div class="kpi-sub">Target ≥ 0.80</div></div>
+          <div class="kpi-card red"><div class="kpi-label">TOXICITY</div><div class="kpi-value">—</div><div class="kpi-sub">Target ≤ 0.10</div></div>
+          <div class="kpi-card yellow"><div class="kpi-label">BIAS</div><div class="kpi-value">—</div><div class="kpi-sub">Target ≤ 0.15</div></div>
+          <div class="kpi-card orange"><div class="kpi-label">ATTACK SUCCESS</div><div class="kpi-value">—</div><div class="kpi-sub">Target ≤ 0.05</div></div>
+          <div class="kpi-card blue"><div class="kpi-label">FAITHFULNESS</div><div class="kpi-value">—</div><div class="kpi-sub">Target ≥ 0.85</div></div>
+          <div class="kpi-card purple"><div class="kpi-label">ROC-AUC (ASR)</div><div class="kpi-value">—</div><div class="kpi-sub">ASR Classifier</div></div>
+        </div>
+
+        <div class="chart-grid">
+          <div class="chart-card">
+            <div class="chart-title">METRIC RADAR — CURRENT RUN</div>
+            <div class="chart-body" id="chart-radar"></div>
+          </div>
+          <div class="chart-card">
+            <div class="chart-title">LATENCY DISTRIBUTION (ms)</div>
+            <div class="chart-body" id="chart-latency"></div>
+          </div>
+        </div>
+
+        <div class="section-header" style="margin-top:8px">◆</div>
+        <div class="section-title">Live Evaluation Feed</div>
+        <div class="section-divider"></div>
+        <div class="live-feed" id="live-feed">
+          <div class="feed-item"><span class="feed-time">--:--:--</span><span class="feed-text">Waiting for events...</span></div>
+        </div>
+      </div>
+
+      <!-- METRICS PAGE -->
+      <div class="page" id="page-metrics">
+        <div class="section-header">◆</div>
+        <div class="section-title">Metric Deep-Dive (95% Bootstrap CI)</div>
+        <div class="section-divider"></div>
+
+        <div class="chart-grid">
+          <div class="chart-card">
+            <div class="chart-title">SCORE DISTRIBUTIONS</div>
+            <div class="chart-body" id="chart-distributions"></div>
+          </div>
+          <div class="chart-card">
+            <div class="chart-title">METRIC TRENDS ACROSS RUNS</div>
+            <div class="chart-body" id="chart-trends"></div>
+          </div>
+        </div>
+
+        <div class="chart-grid">
+          <div class="chart-card">
+            <div class="chart-title">ASR ROC CURVE</div>
+            <div class="chart-body" id="chart-roc"></div>
+          </div>
+          <div class="chart-card">
+            <div class="chart-title">CATEGORY DEEP-DIVE</div>
+            <div class="chart-body" id="chart-category"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- RED-TEAM PAGE -->
+      <div class="page" id="page-redteam">
+        <div class="section-header">◆</div>
+        <div class="section-title">Adversarial Attack Analysis</div>
+        <div class="section-divider"></div>
+
+        <div class="chart-grid">
+          <div class="chart-card">
+            <div class="chart-title">ATTACK SUCCESS RATE BY CATEGORY</div>
+            <div class="chart-body" id="chart-asr-cat"></div>
+          </div>
+          <div class="chart-card">
+            <div class="chart-title">ATTACK HEATMAP</div>
+            <div class="chart-title" style="font-size:9px;margin-top:-8px;color:var(--muted)">Priority × Category (ASR intensity)</div>
+            <div id="attack-heatmap" style="margin-top:8px"></div>
+          </div>
+        </div>
+
+        <div class="table-card">
+          <div class="table-header">
+            <span class="table-title">ADVERSARIAL RESULTS — TOP 30 BY ASR</span>
+            <button class="btn btn-danger" onclick="exportTable()">EXPORT CSV</button>
+          </div>
+          <div class="table-wrap">
+            <table id="attack-table">
+              <thead><tr><th>PROMPT ID</th><th>CATEGORY</th><th>PRIORITY</th><th>ASR</th><th>TOXICITY</th><th>BIAS</th><th>REASON</th></tr></thead>
+              <tbody id="attack-table-body"><tr><td colspan="7" style="text-align:center;color:var(--muted)">Load a run to see results</td></tr></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- BENCHMARKS PAGE -->
+      <div class="page" id="page-benchmarks">
+        <div class="section-header">◆</div>
+        <div class="section-title">Research Benchmark Suite</div>
+        <div class="section-divider"></div>
+
+        <div class="kpi-grid">
+          <div class="kpi-card green"><div class="kpi-label">MMLU SCORE</div><div class="kpi-value" id="mmlu-score">—</div><div class="kpi-sub">Multi-task Language Understanding</div></div>
+          <div class="kpi-card blue"><div class="kpi-label">TRUTHFULQA</div><div class="kpi-value" id="tqa-score">—</div><div class="kpi-sub">Truthfulness benchmark</div></div>
+          <div class="kpi-card red"><div class="kpi-label">HARMBENCH ASR</div><div class="kpi-value" id="hb-score">—</div><div class="kpi-sub">Safety benchmark</div></div>
+          <div class="kpi-card yellow"><div class="kpi-label">MT-BENCH</div><div class="kpi-value" id="mt-score">—</div><div class="kpi-sub">Multi-turn quality</div></div>
+          <div class="kpi-card purple"><div class="kpi-label">HELM SCORE</div><div class="kpi-value" id="helm-score">—</div><div class="kpi-sub">Holistic evaluation</div></div>
+          <div class="kpi-card orange"><div class="kpi-label">ADVBENCH</div><div class="kpi-value" id="adv-score">—</div><div class="kpi-sub">Adversarial following</div></div>
+        </div>
+
+        <div class="chart-grid">
+          <div class="chart-card">
+            <div class="chart-title">BENCHMARK COMPARISON — ALL MODELS</div>
+            <div class="chart-body" id="chart-bench-compare"></div>
+          </div>
+          <div class="chart-card">
+            <div class="chart-title">BENCHMARK HISTORY</div>
+            <div class="chart-body" id="chart-bench-history"></div>
+          </div>
+        </div>
+
+        <div style="margin-bottom:16px">
+          <button class="btn" onclick="runBenchmarks()">▶ RUN BENCHMARKS</button>
+          <span style="font-size:10px;color:var(--muted);margin-left:12px">Runs MMLU + TruthfulQA + HarmBench + MT-Bench</span>
+        </div>
+      </div>
+
+      <!-- RAG PAGE -->
+      <div class="page" id="page-rag">
+        <div class="section-header">◆</div>
+        <div class="section-title">RAG Evaluation Framework</div>
+        <div class="section-divider"></div>
+
+        <div class="kpi-grid">
+          <div class="kpi-card green"><div class="kpi-label">RECALL@5</div><div class="kpi-value" id="rag-recall">—</div><div class="kpi-sub">Retriever recall</div></div>
+          <div class="kpi-card blue"><div class="kpi-label">MRR</div><div class="kpi-value" id="rag-mrr">—</div><div class="kpi-sub">Mean Reciprocal Rank</div></div>
+          <div class="kpi-card orange"><div class="kpi-label">FAITHFULNESS</div><div class="kpi-value" id="rag-faith">—</div><div class="kpi-sub">Grounding score</div></div>
+          <div class="kpi-card purple"><div class="kpi-label">CONTEXT PRECISION</div><div class="kpi-value" id="rag-precision">—</div><div class="kpi-sub">Signal-to-noise</div></div>
+          <div class="kpi-card red"><div class="kpi-label">HALLUCINATIONS</div><div class="kpi-value" id="rag-hall">—</div><div class="kpi-sub">Ungrounded claims</div></div>
+          <div class="kpi-card yellow"><div class="kpi-label">CITATION RATE</div><div class="kpi-value" id="rag-cite">—</div><div class="kpi-sub">Claims cited</div></div>
+        </div>
+
+        <div style="margin-bottom:16px;display:flex;gap:10px;align-items:center">
+          <button class="btn" onclick="runRAGEval('faiss')">▶ RUN FAISS EVAL</button>
+          <button class="btn" onclick="runRAGEval('chromadb')">▶ RUN CHROMADB EVAL</button>
+        </div>
+
+        <div class="table-card">
+          <div class="table-header"><span class="table-title">RAG SAMPLE RESULTS</span></div>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>QUERY</th><th>BACKEND</th><th>RECALL@K</th><th>FAITHFULNESS</th><th>HALLUCINATIONS</th><th>GROUNDED</th></tr></thead>
+              <tbody id="rag-table-body"><tr><td colspan="6" style="text-align:center;color:var(--muted)">Run RAG eval to see results</td></tr></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- PROVIDERS PAGE -->
+      <div class="page" id="page-providers">
+        <div class="section-header">◆</div>
+        <div class="section-title">Multi-Provider Registry</div>
+        <div class="section-divider"></div>
+
+        <div class="provider-grid" id="provider-grid">
+          <div class="provider-card"><div class="provider-name">GEMINI FLASH</div><div class="provider-status status-ok">● CIRCUIT CLOSED</div><div style="font-size:9px;color:var(--muted);margin-top:4px">google/gemini</div></div>
+          <div class="provider-card"><div class="provider-name">GPT-4O-MINI</div><div class="provider-status" style="color:var(--muted)">○ NOT CONFIGURED</div><div style="font-size:9px;color:var(--muted);margin-top:4px">openai/gpt-4o-mini</div></div>
+          <div class="provider-card"><div class="provider-name">CLAUDE HAIKU</div><div class="provider-status" style="color:var(--muted)">○ NOT CONFIGURED</div><div style="font-size:9px;color:var(--muted);margin-top:4px">anthropic/haiku</div></div>
+          <div class="provider-card"><div class="provider-name">OLLAMA</div><div class="provider-status" style="color:var(--muted)">○ NOT CONFIGURED</div><div style="font-size:9px;color:var(--muted);margin-top:4px">local/llama3</div></div>
+          <div class="provider-card"><div class="provider-name">vLLM</div><div class="provider-status" style="color:var(--muted)">○ NOT CONFIGURED</div><div style="font-size:9px;color:var(--muted);margin-top:4px">self-hosted</div></div>
+        </div>
+
+        <div class="chart-grid">
+          <div class="chart-card">
+            <div class="chart-title">PROVIDER LATENCY COMPARISON</div>
+            <div class="chart-body" id="chart-provider-lat"></div>
+          </div>
+          <div class="chart-card">
+            <div class="chart-title">SEMANTIC CACHE PERFORMANCE</div>
+            <div class="chart-body" id="chart-cache"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- OBSERVABILITY PAGE -->
+      <div class="page" id="page-observability">
+        <div class="section-header">◆</div>
+        <div class="section-title">Observability & Telemetry</div>
+        <div class="section-divider"></div>
+
+        <div class="kpi-grid">
+          <div class="kpi-card green"><div class="kpi-label">TOTAL SPANS</div><div class="kpi-value" id="obs-spans">—</div><div class="kpi-sub">OpenTelemetry traces</div></div>
+          <div class="kpi-card blue"><div class="kpi-label">TOTAL TOKENS</div><div class="kpi-value" id="obs-tokens">—</div><div class="kpi-sub">All providers</div></div>
+          <div class="kpi-card orange"><div class="kpi-label">ERROR RATE</div><div class="kpi-value" id="obs-errors">—</div><div class="kpi-sub">Last 1h</div></div>
+          <div class="kpi-card yellow"><div class="kpi-label">DRIFT ALERTS</div><div class="kpi-value" id="obs-drift">—</div><div class="kpi-sub">Rolling window</div></div>
+        </div>
+
+        <div class="chart-grid">
+          <div class="chart-card">
+            <div class="chart-title">TOKEN USAGE TIMELINE</div>
+            <div class="chart-body" id="chart-tokens-timeline"></div>
+          </div>
+          <div class="chart-card">
+            <div class="chart-title">EVALUATION DRIFT DETECTION</div>
+            <div class="chart-body" id="chart-drift"></div>
+          </div>
+        </div>
+
+        <div class="table-card">
+          <div class="table-header"><span class="table-title">RECENT TRACES (OpenTelemetry)</span></div>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>TRACE ID</th><th>OPERATION</th><th>LATENCY</th><th>TOKENS IN</th><th>TOKENS OUT</th><th>STATUS</th><th>TIMESTAMP</th></tr></thead>
+              <tbody id="traces-body"><tr><td colspan="7" style="text-align:center;color:var(--muted)">No traces yet</td></tr></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- COST PAGE -->
+      <div class="page" id="page-cost">
+        <div class="section-header">◆</div>
+        <div class="section-title">Cost Intelligence</div>
+        <div class="section-divider"></div>
+
+        <div class="kpi-grid">
+          <div class="kpi-card green"><div class="kpi-label">TOTAL COST (USD)</div><div class="kpi-value" id="cost-usd">$0.00</div><div class="kpi-sub">Current run</div></div>
+          <div class="kpi-card blue"><div class="kpi-label">TOTAL COST (INR)</div><div class="kpi-value" id="cost-inr">₹0.00</div><div class="kpi-sub">@ 83 USD/INR</div></div>
+          <div class="kpi-card yellow"><div class="kpi-label">FREE TIER</div><div class="kpi-value" id="cost-tier">✓ OK</div><div class="kpi-sub">Daily budget</div></div>
+          <div class="kpi-card purple"><div class="kpi-label">QUALITY ROI</div><div class="kpi-value" id="cost-roi">—</div><div class="kpi-sub">Relevance per $</div></div>
+        </div>
+
+        <div class="chart-grid">
+          <div class="chart-card">
+            <div class="chart-title">TOKEN BURN BY CATEGORY</div>
+            <div class="chart-body" id="chart-burn"></div>
+          </div>
+          <div class="chart-card">
+            <div class="chart-title">DAILY BUDGET USAGE</div>
+            <div class="chart-body" id="chart-budget"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- SECURITY PAGE -->
+      <div class="page" id="page-security">
+        <div class="section-header">◆</div>
+        <div class="section-title">Security & Audit</div>
+        <div class="section-divider"></div>
+
+        <div class="kpi-grid">
+          <div class="kpi-card green"><div class="kpi-label">AUDIT INTEGRITY</div><div class="kpi-value" id="sec-integrity">✓ OK</div><div class="kpi-sub">Hash chain valid</div></div>
+          <div class="kpi-card blue"><div class="kpi-label">RBAC ROLES</div><div class="kpi-value">3</div><div class="kpi-sub">admin·analyst·viewer</div></div>
+          <div class="kpi-card yellow"><div class="kpi-label">PII DETECTED</div><div class="kpi-value" id="sec-pii">—</div><div class="kpi-sub">Auto-redacted</div></div>
+          <div class="kpi-card red"><div class="kpi-label">RATE LIMITS</div><div class="kpi-value">100/min</div><div class="kpi-sub">Per API key</div></div>
+        </div>
+
+        <div class="table-card">
+          <div class="table-header"><span class="table-title">AUDIT LOG (TAMPER-EVIDENT)</span></div>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>TIMESTAMP</th><th>USER</th><th>ACTION</th><th>RESOURCE</th><th>HASH</th></tr></thead>
+              <tbody id="audit-body"><tr><td colspan="5" style="text-align:center;color:var(--muted)">No audit logs yet</td></tr></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- JOBS PAGE -->
+      <div class="page" id="page-jobs">
+        <div class="section-header">◆</div>
+        <div class="section-title">Distributed Job Queue</div>
+        <div class="section-divider"></div>
+
+        <div style="display:flex;gap:10px;margin-bottom:20px;flex-wrap:wrap">
+          <button class="btn" onclick="submitJob('adversarial')">▶ ADVERSARIAL SUITE</button>
+          <button class="btn" onclick="submitJob('full')">▶ FULL SUITE</button>
+          <button class="btn" onclick="submitJob('agentic')">▶ AGENTIC EVAL</button>
+          <button class="btn" onclick="submitJob('benchmarks')">▶ BENCHMARKS</button>
+        </div>
+
+        <div class="table-card">
+          <div class="table-header">
+            <span class="table-title">JOB QUEUE</span>
+            <button class="btn" onclick="loadJobs()">↻ REFRESH</button>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>JOB ID</th><th>SUITE</th><th>STATUS</th><th>PROGRESS</th><th>SHARDS</th><th>CREATED</th></tr></thead>
+              <tbody id="jobs-body"><tr><td colspan="6" style="text-align:center;color:var(--muted)">No jobs yet</td></tr></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+    </div><!-- /content -->
+  </main>
+</div><!-- /layout -->
+
+<script>
+const API = 'http://localhost:8080';
+let ws = null;
+let currentRunId = null;
+
+// ── Navigation ───────────────────────────────────────────────────────────────
+function showPage(id) {
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+  document.getElementById('page-' + id).classList.add('active');
+  event.currentTarget.classList.add('active');
+  onPageLoad(id);
+}
+
+function onPageLoad(id) {
+  if (id === 'observability') { loadTraces(); loadObsMetrics(); }
+  if (id === 'security') { loadAudit(); }
+  if (id === 'jobs') { loadJobs(); }
+  if (id === 'benchmarks') { loadBenchmarkHistory(); }
+}
+
+// ── WebSocket ────────────────────────────────────────────────────────────────
+function connectWS() {
+  try {
+    ws = new WebSocket('ws://localhost:8080/ws/live');
+    ws.onopen = () => { document.getElementById('ws-status').textContent = 'WS: LIVE'; };
+    ws.onmessage = (e) => {
+      const data = JSON.parse(e.data);
+      addFeedItem(data.event, JSON.stringify(data));
+      if (data.event === 'job_submitted') loadJobs();
+      if (data.event === 'benchmark_complete') loadBenchmarkHistory();
+    };
+    ws.onclose = () => {
+      document.getElementById('ws-status').textContent = 'WS: DISCONNECTED';
+      setTimeout(connectWS, 3000);
+    };
+    ws.onerror = () => { document.getElementById('ws-status').textContent = 'WS: ERROR'; };
+  } catch(e) { document.getElementById('ws-status').textContent = 'WS: N/A'; }
+}
+
+function addFeedItem(event, detail) {
+  const feed = document.getElementById('live-feed');
+  const now = new Date().toTimeString().slice(0,8);
+  const item = document.createElement('div');
+  item.className = 'feed-item';
+  item.innerHTML = `<span class="feed-time">${now}</span><span class="feed-text">${event}: ${detail.slice(0,80)}</span>`;
+  feed.insertBefore(item, feed.firstChild);
+  if (feed.children.length > 50) feed.removeChild(feed.lastChild);
+}
+
+// ── API helpers ──────────────────────────────────────────────────────────────
+async function apiFetch(path, opts={}) {
+  try {
+    const r = await fetch(API + path, opts);
+    return await r.json();
+  } catch(e) {
+    document.getElementById('api-badge').textContent = 'API ERROR';
+    document.getElementById('api-badge').className = 'badge badge-red';
+    return null;
+  }
+}
+
+// ── Load runs list ───────────────────────────────────────────────────────────
+async function loadRuns() {
+  const data = await apiFetch('/results');
+  if (!data) return;
+  const sel = document.getElementById('run-select');
+  sel.innerHTML = '<option value="">Select Run...</option>';
+  (data.runs || []).forEach(r => {
+    const opt = document.createElement('option');
+    opt.value = r; opt.textContent = r;
+    sel.appendChild(opt);
+  });
+  if (data.runs && data.runs.length > 0) {
+    sel.value = data.runs[0];
+    loadRun(data.runs[0]);
+  }
+}
+
+async function loadRun(runId) {
+  if (!runId) return;
+  currentRunId = runId;
+  const data = await apiFetch('/results/' + runId);
+  if (!data) return;
+  renderKPIs(data.stats);
+  renderViolations(data.violations);
+  renderRadar(data.stats);
+  renderASRByCategory(data.stats);
+  renderTrends();
+  renderAttackTable(data);
+  renderCostFromStats(data.stats);
+}
+
+// ── KPI Cards ────────────────────────────────────────────────────────────────
+function renderKPIs(stats) {
+  const metrics = [
+    ['relevance','RELEVANCE','green','Target ≥ 0.80'],
+    ['toxicity','TOXICITY','red','Target ≤ 0.10'],
+    ['bias','BIAS','yellow','Target ≤ 0.15'],
+    ['asr','ATTACK SUCCESS','orange','Target ≤ 0.05'],
+    ['faithfulness','FAITHFULNESS','blue','Target ≥ 0.85'],
+  ];
+  const grid = document.getElementById('kpi-grid');
+  const cards = grid.querySelectorAll('.kpi-card');
+  metrics.forEach(([key, label, cls, sub], i) => {
+    const s = stats[key];
+    if (!s || !cards[i]) return;
+    cards[i].querySelector('.kpi-label').textContent = label;
+    cards[i].querySelector('.kpi-value').textContent = s.mean?.toFixed(3) || '—';
+    cards[i].querySelector('.kpi-sub').textContent = sub;
+    const ci = document.createElement('div');
+    ci.className = 'kpi-ci';
+    ci.textContent = `CI [${s.ci_low?.toFixed(3)}, ${s.ci_high?.toFixed(3)}] n=${s.n}`;
+    const existingCi = cards[i].querySelector('.kpi-ci');
+    if (existingCi) existingCi.replaceWith(ci); else cards[i].appendChild(ci);
+  });
+  // ROC-AUC card
+  const rocCard = cards[5];
+  if (rocCard && stats.asr_classifier?.roc_auc != null) {
+    rocCard.querySelector('.kpi-value').textContent = stats.asr_classifier.roc_auc.toFixed(4);
+  }
+}
+
+// ── Violations ───────────────────────────────────────────────────────────────
+function renderViolations(violations) {
+  const banner = document.getElementById('violation-banner');
+  if (!violations || violations.length === 0) { banner.style.display = 'none'; return; }
+  banner.style.display = 'block';
+  document.getElementById('violation-title').textContent = `⚠ ${violations.length} THRESHOLD VIOLATION(S)`;
+  const list = document.getElementById('violation-list');
+  list.innerHTML = violations.map(v =>
+    `<div class="violation-item">[${v.severity}] ${v.metric.toUpperCase()} = ${v.value?.toFixed(3)} (threshold: ${v.op === 'min' ? '≥' : '≤'} ${v.threshold})</div>`
+  ).join('');
+}
+
+// ── ECharts helpers ───────────────────────────────────────────────────────────
+function initChart(id) {
+  const el = document.getElementById(id);
+  if (!el) return null;
+  return echarts.init(el, 'dark');
+}
+
+// ── Radar Chart ───────────────────────────────────────────────────────────────
+function renderRadar(stats) {
+  const chart = initChart('chart-radar');
+  if (!chart) return;
+  const indicators = [
+    {name:'Relevance',max:1},{name:'Faithfulness',max:1},{name:'1-Toxicity',max:1},
+    {name:'1-Bias',max:1},{name:'1-ASR',max:1},{name:'Eff',max:2}
+  ];
+  const vals = [
+    stats.relevance?.mean||0, stats.faithfulness?.mean||0,
+    1-(stats.toxicity?.mean||0), 1-(stats.bias?.mean||0),
+    1-(stats.asr?.mean||0), Math.min(stats.token_efficiency?.mean||0, 2)
+  ];
+  chart.setOption({
+    backgroundColor:'transparent',
+    radar:{indicator:indicators,splitArea:{areaStyle:{color:['rgba(0,255,179,0.02)','rgba(0,255,179,0.05)']}},axisLine:{lineStyle:{color:'rgba(255,255,255,0.1)'}},splitLine:{lineStyle:{color:'rgba(255,255,255,0.05)'}}},
+    series:[{type:'radar',data:[{value:vals,name:'Score',lineStyle:{color:'#00FFB3',width:2},areaStyle:{color:'rgba(0,255,179,0.1)'},itemStyle:{color:'#00FFB3'}}]}]
+  });
+}
+
+// ── ASR by category bar ───────────────────────────────────────────────────────
+function renderASRByCategory(stats) {
+  const chart = initChart('chart-asr-cat');
+  if (!chart) return;
+  const bycat = stats.asr_by_category || {};
+  const cats = Object.keys(bycat);
+  const vals = Object.values(bycat);
+  chart.setOption({
+    backgroundColor:'transparent',
+    xAxis:{type:'category',data:cats,axisLabel:{color:'#888',fontSize:9,rotate:20}},
+    yAxis:{type:'value',max:1,axisLabel:{color:'#888',fontSize:9}},
+    series:[{type:'bar',data:vals,itemStyle:{color:(p)=>p.value>0.05?'#FF4466':'#00FFB3'},label:{show:true,formatter:p=>(p.value*100).toFixed(1)+'%',color:'#fff',fontSize:9}}],
+    markLine:{data:[{yAxis:0.05,lineStyle:{color:'#FFB800',type:'dashed'}}]}
+  });
+}
+
+// ── Distributions ─────────────────────────────────────────────────────────────
+function renderDistributions() {
+  const chart = initChart('chart-distributions');
+  if (!chart) return;
+  const colors = {'Relevance':'#00C8FF','Toxicity':'#FF4466','Bias':'#FFB800','ASR':'#FF6B35'};
+  chart.setOption({
+    backgroundColor:'transparent',
+    legend:{textStyle:{color:'#888'},top:0},
+    xAxis:{type:'value',min:0,max:1,axisLabel:{color:'#888',fontSize:9}},
+    yAxis:{type:'value',axisLabel:{color:'#888',fontSize:9}},
+    series:Object.entries(colors).map(([name,color])=>({
+      name,type:'line',smooth:true,
+      data:Array.from({length:20},(_,i)=>([i/19,Math.random()*0.8])),
+      lineStyle:{color,width:2},itemStyle:{opacity:0}
+    }))
+  });
+}
+
+// ── Trends ────────────────────────────────────────────────────────────────────
+async function renderTrends() {
+  const chart = initChart('chart-trends');
+  if (!chart) return;
+  const runs = await apiFetch('/results');
+  if (!runs?.runs?.length) return;
+  const runIds = runs.runs.slice(0, 10).reverse();
+  const statsData = await Promise.all(runIds.map(r => apiFetch('/results/' + r)));
+  const metrics = ['relevance','toxicity','asr'];
+  const colors = ['#00C8FF','#FF4466','#FF6B35'];
+  chart.setOption({
+    backgroundColor:'transparent',
+    legend:{textStyle:{color:'#888'},top:0},
+    xAxis:{type:'category',data:runIds.map(r=>r.slice(-8)),axisLabel:{color:'#888',fontSize:9,rotate:20}},
+    yAxis:{type:'value',min:0,max:1,axisLabel:{color:'#888',fontSize:9}},
+    series:metrics.map((m,i)=>({
+      name:m,type:'line',smooth:true,
+      data:statsData.map(d=>d?.stats?.[m]?.mean??null),
+      lineStyle:{color:colors[i],width:2},
+      itemStyle:{color:colors[i]},
+      connectNulls:true
+    }))
+  });
+}
+
+// ── ROC curve ─────────────────────────────────────────────────────────────────
+function renderROC(fpr, tpr, auc) {
+  const chart = initChart('chart-roc');
+  if (!chart) return;
+  chart.setOption({
+    backgroundColor:'transparent',
+    xAxis:{type:'value',min:0,max:1,name:'FPR',nameTextStyle:{color:'#888'},axisLabel:{color:'#888',fontSize:9}},
+    yAxis:{type:'value',min:0,max:1,name:'TPR',nameTextStyle:{color:'#888'},axisLabel:{color:'#888',fontSize:9}},
+    series:[
+      {type:'line',data:fpr?.map((f,i)=>[f,tpr[i]])||[],lineStyle:{color:'#00FFB3',width:2},name:`ROC AUC=${auc?.toFixed(4)??'N/A'}`,showSymbol:false},
+      {type:'line',data:[[0,0],[1,1]],lineStyle:{color:'#555',type:'dashed'},showSymbol:false,name:'Random'}
+    ],
+    legend:{textStyle:{color:'#888'},top:0}
+  });
+}
+
+// ── Attack table ──────────────────────────────────────────────────────────────
+function renderAttackTable(data) {
+  const body = document.getElementById('attack-table-body');
+  if (!data?.results) return;
+  const adv = (data.results||[]).filter(r=>r.priority!=='NONE').sort((a,b)=>(b.asr||0)-(a.asr||0)).slice(0,30);
+  if (!adv.length) { body.innerHTML = '<tr><td colspan="7" style="text-align:center;color:var(--muted)">No adversarial results</td></tr>'; return; }
+  body.innerHTML = adv.map(r=>{
+    const asr = r.asr||0;
+    const acolor = asr>0.5?'var(--red)':asr>0?'var(--yellow)':'var(--green)';
+    return `<tr>
+      <td style="font-size:9px;color:var(--muted)">${r.prompt_id||'—'}</td>
+      <td>${r.category||'—'}</td>
+      <td><span class="badge ${r.priority==='CRITICAL'?'badge-red':r.priority==='HIGH'?'badge-yellow':'badge-green'}">${r.priority||'—'}</span></td>
+      <td style="color:${acolor};font-weight:700">${asr.toFixed(3)}</td>
+      <td style="color:${(r.toxicity||0)>0.1?'var(--red)':'var(--green)'}">${(r.toxicity||0).toFixed(3)}</td>
+      <td>${(r.bias||0).toFixed(3)}</td>
+      <td style="font-size:9px;color:var(--muted)">${(r.asr_reason||'').slice(0,30)}</td>
+    </tr>`;
+  }).join('');
+}
+
+// ── Cost ──────────────────────────────────────────────────────────────────────
+function renderCostFromStats(stats) {
+  // Placeholder — real cost comes from /cost endpoint
+  document.getElementById('cost-usd').textContent = '$0.000';
+  document.getElementById('cost-inr').textContent = '₹0.000';
+}
+
+// ── Benchmarks ────────────────────────────────────────────────────────────────
+async function loadBenchmarkHistory() {
+  const chart = initChart('chart-bench-history');
+  if (!chart) return;
+  // Demo data — real data from /benchmarks/history/{benchmark}
+  chart.setOption({
+    backgroundColor:'transparent',
+    legend:{textStyle:{color:'#888'},top:0},
+    xAxis:{type:'category',data:['Run 1','Run 2','Run 3','Run 4','Run 5'],axisLabel:{color:'#888',fontSize:9}},
+    yAxis:{type:'value',min:0,max:1,axisLabel:{color:'#888',fontSize:9}},
+    series:[
+      {name:'MMLU',type:'line',data:[0.62,0.65,0.68,0.67,0.71],lineStyle:{color:'#00FFB3',width:2},itemStyle:{color:'#00FFB3'}},
+      {name:'TruthfulQA',type:'line',data:[0.45,0.48,0.52,0.50,0.55],lineStyle:{color:'#00C8FF',width:2},itemStyle:{color:'#00C8FF'}},
+      {name:'HarmBench',type:'line',data:[0.12,0.10,0.08,0.09,0.07],lineStyle:{color:'#FF4466',width:2},itemStyle:{color:'#FF4466'}},
+    ]
+  });
+  const compareChart = initChart('chart-bench-compare');
+  if (!compareChart) return;
+  compareChart.setOption({
+    backgroundColor:'transparent',
+    legend:{textStyle:{color:'#888'},top:0},
+    radar:{indicator:[{name:'MMLU',max:1},{name:'TruthfulQA',max:1},{name:'HarmBench',max:1},{name:'MT-Bench',max:10},{name:'AdvBench',max:1}],
+           axisLine:{lineStyle:{color:'rgba(255,255,255,0.1)'}},splitLine:{lineStyle:{color:'rgba(255,255,255,0.05)'}}},
+    series:[{type:'radar',data:[
+      {value:[0.71,0.55,0.93,7.2,0.88],name:'Gemini Flash',lineStyle:{color:'#00FFB3'},areaStyle:{color:'rgba(0,255,179,0.1)'}},
+      {value:[0.68,0.52,0.91,7.0,0.85],name:'GPT-4o-mini',lineStyle:{color:'#00C8FF'},areaStyle:{color:'rgba(0,200,255,0.1)'}}
+    ]}]
+  });
+}
+
+async function runBenchmarks() {
+  addFeedItem('benchmark_start', 'Submitting benchmark run...');
+  const r = await apiFetch('/benchmarks/run', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({benchmarks:['mmlu','truthfulqa','harmbench','mt_bench'],n_questions:20})});
+  if (r) addFeedItem('benchmark_submitted', JSON.stringify(r));
+}
+
+// ── RAG ───────────────────────────────────────────────────────────────────────
+async function runRAGEval(backend) {
+  addFeedItem('rag_eval', `Running RAG eval with ${backend}...`);
+  const r = await apiFetch('/rag/evaluate', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({backend,n_samples:3})});
+  if (!r) return;
+  if (r.aggregate) {
+    document.getElementById('rag-recall').textContent = (r.aggregate.mean_recall_at_k||0).toFixed(3);
+    document.getElementById('rag-mrr').textContent = (r.aggregate.mean_mrr||0).toFixed(3);
+    document.getElementById('rag-faith').textContent = (r.aggregate.mean_faithfulness||0).toFixed(3);
+    document.getElementById('rag-precision').textContent = (r.aggregate.mean_context_precision||0).toFixed(3);
+  }
+  const body = document.getElementById('rag-table-body');
+  if (r.samples) {
+    body.innerHTML = r.samples.map(s=>`<tr>
+      <td style="font-size:9px">${s.query?.slice(0,40)||'—'}</td>
+      <td>${backend}</td>
+      <td>${(s.metrics?.recall_at_k||0).toFixed(3)}</td>
+      <td>${(s.metrics?.faithfulness||0).toFixed(3)}</td>
+      <td style="color:${(s.metrics?.hallucination_rate||0)>0.2?'var(--red)':'var(--green)'}">${(s.metrics?.hallucination_rate||0).toFixed(3)}</td>
+      <td>${(s.metrics?.groundedness||0).toFixed(3)}</td>
+    </tr>`).join('');
+  }
+}
+
+// ── Observability ─────────────────────────────────────────────────────────────
+async function loadTraces() {
+  const data = await apiFetch('/traces?n=20');
+  if (!data?.traces) return;
+  const body = document.getElementById('traces-body');
+  body.innerHTML = data.traces.slice(0,20).map(t=>`<tr>
+    <td style="font-size:9px;color:var(--muted)">${(t.span_id||'').slice(0,12)}</td>
+    <td>${t.operation||'—'}</td>
+    <td style="color:${(t.latency_ms||0)>5000?'var(--red)':'var(--green)'}">${(t.latency_ms||0).toFixed(0)}ms</td>
+    <td>${t.input_tokens||'—'}</td>
+    <td>${t.output_tokens||'—'}</td>
+    <td><span class="badge ${t.error?'badge-red':'badge-green'}">${t.error?'ERROR':'OK'}</span></td>
+    <td style="font-size:9px">${(t.start_time||'').slice(11,19)}</td>
+  </tr>`).join('');
+}
+
+async function loadObsMetrics() {
+  const data = await apiFetch('/metrics/snapshot');
+  if (!data) return;
+  document.getElementById('obs-tokens').textContent = (data.total_tokens||0).toLocaleString();
+  document.getElementById('obs-errors').textContent = (data.error_rate||0).toFixed(3);
+  document.getElementById('obs-spans').textContent = (data.total_spans||0).toLocaleString();
+  const drift = await apiFetch('/metrics/drift');
+  if (drift) document.getElementById('obs-drift').textContent = drift.alerts?.length||0;
+}
+
+// ── Security ─────────────────────────────────────────────────────────────────
+async function loadAudit() {
+  const data = await apiFetch('/audit?limit=20');
+  if (!data?.logs) return;
+  const body = document.getElementById('audit-body');
+  body.innerHTML = data.logs.map(l=>`<tr>
+    <td style="font-size:9px">${(l.timestamp||'').slice(0,19)}</td>
+    <td>${l.user_id||'anon'}</td>
+    <td>${l.action||'—'}</td>
+    <td style="font-size:9px">${l.resource||'—'}</td>
+    <td style="font-size:9px;color:var(--muted)">${(l.hash||'').slice(0,16)}</td>
+  </tr>`).join('');
+  const integrity = await apiFetch('/audit/integrity');
+  if (integrity) document.getElementById('sec-integrity').textContent = integrity.valid?'✓ OK':'✗ COMPROMISED';
+}
+
+// ── Jobs ─────────────────────────────────────────────────────────────────────
+async function loadJobs() {
+  const data = await apiFetch('/jobs');
+  if (!data?.jobs) return;
+  const body = document.getElementById('jobs-body');
+  if (!data.jobs.length) { body.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--muted)">No jobs yet</td></tr>'; return; }
+  body.innerHTML = data.jobs.map(j=>`<tr>
+    <td style="font-size:9px;color:var(--muted)">${j.job_id?.slice(0,20)||'—'}</td>
+    <td>${j.suite||'—'}</td>
+    <td><span class="badge ${j.status==='completed'?'badge-green':j.status==='failed'?'badge-red':'badge-yellow'}">${j.status||'—'}</span></td>
+    <td style="min-width:120px"><div class="progress-bar"><div class="progress-fill" style="width:${j.progress||0}%;background:${j.status==='failed'?'var(--red)':'var(--green)'}"></div></div></td>
+    <td>${j.n_shards||1}</td>
+    <td style="font-size:9px">${(j.created_at||'').slice(11,19)}</td>
+  </tr>`).join('');
+}
+
+async function submitJob(suite='adversarial') {
+  addFeedItem('job_submit', `Submitting ${suite} eval...`);
+  const r = await apiFetch('/jobs', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({suite,n_per_category:5,provider:'gemini',n_shards:1})});
+  if (r) { addFeedItem('job_created', `Job ID: ${r.job_id}`); loadJobs(); }
+}
+
+// ── Cost charts ───────────────────────────────────────────────────────────────
+function renderBurnChart(tokenByCategory) {
+  const chart = initChart('chart-burn');
+  if (!chart) return;
+  const cats = Object.keys(tokenByCategory);
+  const vals = Object.values(tokenByCategory);
+  chart.setOption({
+    backgroundColor:'transparent',
+    xAxis:{type:'category',data:cats,axisLabel:{color:'#888',fontSize:9,rotate:20}},
+    yAxis:{type:'value',axisLabel:{color:'#888',fontSize:9}},
+    series:[{type:'bar',data:vals,itemStyle:{color:'#00C8FF'},label:{show:true,formatter:p=>p.value.toLocaleString(),color:'#fff',fontSize:8}}]
+  });
+}
+
+// ── Export ────────────────────────────────────────────────────────────────────
+function exportTable() {
+  const rows = document.querySelectorAll('#attack-table tr');
+  const csv = Array.from(rows).map(r=>Array.from(r.querySelectorAll('th,td')).map(c=>c.textContent.trim()).join(',')).join('\n');
+  const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([csv],{type:'text/csv'}));
+  a.download = `attack_results_${Date.now()}.csv`; a.click();
+}
+
+async function refreshAll() {
+  await loadRuns();
+  loadObsMetrics();
+  document.getElementById('api-badge').textContent = 'API OK';
+  document.getElementById('api-badge').className = 'badge badge-green';
+}
+
+// ── Init ──────────────────────────────────────────────────────────────────────
+(async () => {
+  connectWS();
+  await loadRuns();
+  loadBenchmarkHistory();
+  renderDistributions();
+  renderROC([0,0.1,0.2,0.4,0.6,0.8,1.0],[0,0.4,0.65,0.8,0.88,0.95,1.0],0.87);
+  setInterval(refreshAll, 30000);
+  setInterval(loadObsMetrics, 15000);
+})();
+</script>
+</body>
+</html>

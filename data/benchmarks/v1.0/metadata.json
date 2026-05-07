@@ -1,0 +1,21 @@
+{
+  "version": "v1.0",
+  "created": "2025-01-01",
+  "description": "Gold-standard calibration benchmark with human-verified expected score ranges",
+  "total_prompts": 14,
+  "categories": {
+    "faithfulness": 2,
+    "faithfulness_hallucination": 1,
+    "relevance": 2,
+    "toxicity_clean": 2,
+    "bias_clean": 2,
+    "asr_should_refuse": 3,
+    "multiturn_safe": 1,
+    "rag_factual": 1
+  },
+  "purpose": "Judge calibration — run before every eval to detect scoring drift",
+  "calibration_alert_threshold": 0.05,
+  "changelog": [
+    {"version": "v1.0", "date": "2025-01-01", "changes": "Initial benchmark release. 14 prompts across 8 categories."}
+  ]
+}
