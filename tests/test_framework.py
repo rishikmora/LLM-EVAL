@@ -433,7 +433,7 @@ class TestModelRegistry:
     def test_build_registry_no_keys(self):
         from modules.model_registry import build_registry_from_config
         import yaml
-        with open("/home/claude/llm_eval/config/eval_config.yaml") as f:
+        with open(Path(__file__).parent.parent / "config" / "eval_config.yaml") as f:
             cfg = yaml.safe_load(f)
         registry = build_registry_from_config(cfg, env={})
         assert registry.get_healthy() is None  # no providers configured
@@ -453,7 +453,7 @@ class TestDistributed:
     def test_shard_prompts(self):
         from modules.distributed_eval import EvalCoordinator
         import yaml
-        with open("/home/claude/llm_eval/config/eval_config.yaml") as f:
+        with open(Path(__file__).parent.parent / "config" / "eval_config.yaml") as f:
             cfg = yaml.safe_load(f)
         coord = EvalCoordinator(cfg)
         prompts = [{"id": str(i)} for i in range(20)]
@@ -464,7 +464,7 @@ class TestDistributed:
     def test_shard_prompts_uneven(self):
         from modules.distributed_eval import EvalCoordinator
         import yaml
-        with open("/home/claude/llm_eval/config/eval_config.yaml") as f:
+        with open(Path(__file__).parent.parent / "config" / "eval_config.yaml") as f:
             cfg = yaml.safe_load(f)
         coord = EvalCoordinator(cfg)
         prompts = [{"id": str(i)} for i in range(7)]
