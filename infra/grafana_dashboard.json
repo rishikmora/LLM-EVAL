@@ -1,0 +1,91 @@
+{
+  "title": "LLM Eval Platform",
+  "uid": "llm-eval-v2",
+  "version": 1,
+  "refresh": "15s",
+  "time": {"from": "now-1h", "to": "now"},
+  "panels": [
+    {
+      "id": 1, "type": "stat", "title": "ASR (Attack Success Rate)",
+      "gridPos": {"x": 0, "y": 0, "w": 4, "h": 4},
+      "targets": [{"expr": "eval_asr_score_current", "legendFormat": "ASR"}],
+      "options": {"reduceOptions": {"calcs": ["lastNotNull"]}, "colorMode": "background"},
+      "fieldConfig": {"defaults": {"thresholds": {"steps": [
+        {"value": 0, "color": "green"}, {"value": 0.05, "color": "yellow"}, {"value": 0.20, "color": "red"}
+      ]}, "unit": "percentunit"}}
+    },
+    {
+      "id": 2, "type": "stat", "title": "Total LLM Calls",
+      "gridPos": {"x": 4, "y": 0, "w": 4, "h": 4},
+      "targets": [{"expr": "eval_llm_calls_total", "legendFormat": "Calls"}],
+      "options": {"reduceOptions": {"calcs": ["lastNotNull"]}, "colorMode": "value"}
+    },
+    {
+      "id": 3, "type": "stat", "title": "Total Cost (USD)",
+      "gridPos": {"x": 8, "y": 0, "w": 4, "h": 4},
+      "targets": [{"expr": "eval_total_cost_usd", "legendFormat": "USD"}],
+      "options": {"reduceOptions": {"calcs": ["lastNotNull"]}, "colorMode": "value"},
+      "fieldConfig": {"defaults": {"unit": "currencyUSD"}}
+    },
+    {
+      "id": 4, "type": "stat", "title": "P95 Latency",
+      "gridPos": {"x": 12, "y": 0, "w": 4, "h": 4},
+      "targets": [{"expr": "eval_latency_p95_ms", "legendFormat": "ms"}],
+      "options": {"reduceOptions": {"calcs": ["lastNotNull"]}, "colorMode": "background"},
+      "fieldConfig": {"defaults": {"unit": "ms", "thresholds": {"steps": [
+        {"value": 0, "color": "green"}, {"value": 5000, "color": "yellow"}, {"value": 8000, "color": "red"}
+      ]}}}
+    },
+    {
+      "id": 5, "type": "stat", "title": "Cache Hit Rate",
+      "gridPos": {"x": 16, "y": 0, "w": 4, "h": 4},
+      "targets": [{"expr": "eval_cache_hit_rate", "legendFormat": "Hit Rate"}],
+      "options": {"reduceOptions": {"calcs": ["lastNotNull"]}, "colorMode": "value"},
+      "fieldConfig": {"defaults": {"unit": "percentunit"}}
+    },
+    {
+      "id": 6, "type": "timeseries", "title": "Token Usage Over Time",
+      "gridPos": {"x": 0, "y": 4, "w": 12, "h": 8},
+      "targets": [
+        {"expr": "rate(eval_total_tokens_in[5m])", "legendFormat": "Input tokens/min"},
+        {"expr": "rate(eval_total_tokens_out[5m])", "legendFormat": "Output tokens/min"}
+      ],
+      "fieldConfig": {"defaults": {"unit": "short"}}
+    },
+    {
+      "id": 7, "type": "timeseries", "title": "ASR Trend",
+      "gridPos": {"x": 12, "y": 4, "w": 12, "h": 8},
+      "targets": [{"expr": "eval_asr_score_current", "legendFormat": "ASR"}],
+      "fieldConfig": {"defaults": {
+        "unit": "percentunit",
+        "custom": {"thresholdsStyle": {"mode": "area"}},
+        "thresholds": {"steps": [{"value": 0, "color": "green"}, {"value": 0.05, "color": "red"}]}
+      }}
+    },
+    {
+      "id": 8, "type": "timeseries", "title": "LLM Call Rate",
+      "gridPos": {"x": 0, "y": 12, "w": 12, "h": 8},
+      "targets": [{"expr": "rate(eval_llm_calls_total[1m])", "legendFormat": "calls/sec"}]
+    },
+    {
+      "id": 9, "type": "gauge", "title": "Daily Token Budget Usage",
+      "gridPos": {"x": 12, "y": 12, "w": 6, "h": 8},
+      "targets": [{"expr": "eval_budget_used_pct", "legendFormat": "Budget %"}],
+      "fieldConfig": {"defaults": {
+        "unit": "percentunit", "min": 0, "max": 1,
+        "thresholds": {"steps": [
+          {"value": 0, "color": "green"}, {"value": 0.8, "color": "yellow"}, {"value": 0.95, "color": "red"}
+        ]}
+      }}
+    },
+    {
+      "id": 10, "type": "stat", "title": "Circuit Breaker Trips",
+      "gridPos": {"x": 18, "y": 12, "w": 6, "h": 8},
+      "targets": [{"expr": "eval_circuit_breaker_trips", "legendFormat": "Trips"}],
+      "options": {"colorMode": "background"},
+      "fieldConfig": {"defaults": {"thresholds": {"steps": [
+        {"value": 0, "color": "green"}, {"value": 1, "color": "yellow"}, {"value": 5, "color": "red"}
+      ]}}}
+    }
+  ]
+}

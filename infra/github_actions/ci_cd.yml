@@ -1,0 +1,141 @@
+name: LLM Eval CI/CD Pipeline
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: '0 2 * * *'  # Nightly benchmark at 2 AM UTC
+
+env:
+  PYTHON_VERSION: "3.12"
+
+jobs:
+  # ── Test Suite ────────────────────────────────────────────────────────────
+  test:
+    name: Unit Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt pytest pytest-asyncio
+
+      - name: Run tests
+        run: pytest tests/ -v --tb=short --junit-xml=test-results.xml
+
+      - name: Upload test results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: test-results
+          path: test-results.xml
+
+  # ── Judge Calibration ─────────────────────────────────────────────────────
+  calibration:
+    name: Judge Calibration Check
+    runs-on: ubuntu-latest
+    needs: test
+    if: github.ref == 'refs/heads/main'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+      - name: Install
+        run: pip install -r requirements.txt
+      - name: Run calibration
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: python run_eval.py --calibrate
+        continue-on-error: true
+
+  # ── Nightly Benchmark ─────────────────────────────────────────────────────
+  nightly_benchmark:
+    name: Nightly Evaluation Run
+    runs-on: ubuntu-latest
+    if: github.event_name == 'schedule'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+      - name: Install
+        run: pip install -r requirements.txt
+      - name: Run adversarial suite
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: python run_eval.py --suite adversarial --n 5
+      - name: Upload results
+        uses: actions/upload-artifact@v4
+        with:
+          name: nightly-results-${{ github.run_number }}
+          path: data/results_*.jsonl
+          retention-days: 30
+
+  # ── Regression Check ──────────────────────────────────────────────────────
+  regression:
+    name: Regression Detection
+    runs-on: ubuntu-latest
+    needs: nightly_benchmark
+    if: github.event_name == 'schedule'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+      - name: Install
+        run: pip install -r requirements.txt
+      - name: Download results
+        uses: actions/download-artifact@v4
+        with:
+          name: nightly-results-${{ github.run_number }}
+          path: data/
+      - name: Check for regressions
+        run: |
+          python -c "
+          from modules.tracker import list_runs, load_run_results, compute_run_stats, compare_runs, check_thresholds
+          from modules.evaluator import load_config
+          from pathlib import Path
+          cfg = load_config()
+          db = Path(cfg['database']['path'])
+          runs = list_runs(db)
+          if len(runs) >= 2:
+              ra = load_run_results(runs[1], db)
+              rb = load_run_results(runs[0], db)
+              sa = compute_run_stats(ra)
+              sb = compute_run_stats(rb)
+              from modules.tracker import compare_runs
+              comp = compare_runs(sa, sb, ra, rb)
+              alerts = [m for m, c in comp.items() if c.get('should_alert') and c['direction'] == 'degraded']
+              if alerts:
+                  print(f'REGRESSION DETECTED on: {alerts}')
+                  exit(1)
+              print('No statistically significant regressions detected')
+          "
+
+  # ── Docker Build ──────────────────────────────────────────────────────────
+  docker:
+    name: Docker Build & Push
+    runs-on: ubuntu-latest
+    needs: test
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Build Docker image
+        run: |
+          docker build -f infra/docker/Dockerfile -t llm-eval:${{ github.sha }} .
+          docker tag llm-eval:${{ github.sha }} llm-eval:latest
+          echo "Docker image built: llm-eval:latest"
+        # Push to registry: add docker/login-action and docker/build-push-action steps
+        # when you have a registry configured

@@ -1,0 +1,120 @@
+version: "3.9"
+
+services:
+  # ── FastAPI Backend ────────────────────────────────────────────────────────
+  api:
+    build: .
+    container_name: llm-eval-api
+    ports: ["8080:8080"]
+    environment:
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - REDIS_URL=redis://redis:6379/0
+      - API_AUTH_REQUIRED=${API_AUTH_REQUIRED:-false}
+      - LANGFUSE_PUBLIC_KEY=${LANGFUSE_PUBLIC_KEY:-}
+      - LANGFUSE_SECRET_KEY=${LANGFUSE_SECRET_KEY:-}
+    depends_on: [redis]
+    volumes:
+      - ./data:/app/data
+      - ./config:/app/config
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ── Streamlit Research Dashboard ──────────────────────────────────────────
+  dashboard:
+    build: .
+    container_name: llm-eval-dashboard
+    command: ["streamlit", "run", "modules/dashboard.py",
+              "--server.port=8501", "--server.address=0.0.0.0",
+              "--server.headless=true"]
+    ports: ["8501:8501"]
+    environment:
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+    volumes:
+      - ./data:/app/data
+    depends_on: [api]
+    restart: unless-stopped
+
+  # ── Celery Worker ─────────────────────────────────────────────────────────
+  worker:
+    build: .
+    container_name: llm-eval-worker
+    command: ["celery", "-A", "workers.distributed", "worker",
+              "--loglevel=info", "--concurrency=4",
+              "--queues=eval_tasks,benchmark_tasks"]
+    environment:
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - REDIS_URL=redis://redis:6379/0
+    depends_on: [redis]
+    volumes:
+      - ./data:/app/data
+    restart: unless-stopped
+    deploy:
+      replicas: 2
+
+  # ── Redis ─────────────────────────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    container_name: llm-eval-redis
+    ports: ["6379:6379"]
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes --maxmemory 512mb --maxmemory-policy allkeys-lru
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── Prometheus ────────────────────────────────────────────────────────────
+  prometheus:
+    image: prom/prometheus:v2.53.0
+    container_name: llm-eval-prometheus
+    ports: ["9090:9090"]
+    volumes:
+      - ./infra/docker/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.retention.time=30d"
+    restart: unless-stopped
+
+  # ── Grafana ───────────────────────────────────────────────────────────────
+  grafana:
+    image: grafana/grafana:11.1.0
+    container_name: llm-eval-grafana
+    ports: ["3001:3000"]
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:-admin}
+      - GF_USERS_ALLOW_SIGN_UP=false
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./infra/grafana_dashboard.json:/var/lib/grafana/dashboards/llm_eval.json:ro
+    depends_on: [prometheus]
+    restart: unless-stopped
+
+  # ── Flower (Celery monitoring) ────────────────────────────────────────────
+  flower:
+    build: .
+    container_name: llm-eval-flower
+    command: ["celery", "-A", "workers.distributed", "flower",
+              "--port=5555", "--broker=redis://redis:6379/0"]
+    ports: ["5555:5555"]
+    depends_on: [redis]
+    restart: unless-stopped
+
+volumes:
+  redis_data:
+  prometheus_data:
+  grafana_data:
+
+networks:
+  default:
+    name: llm-eval-network

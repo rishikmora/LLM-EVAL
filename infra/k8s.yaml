@@ -1,0 +1,94 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: llm-eval-api
+  labels: {app: llm-eval-api}
+spec:
+  replicas: 2
+  selector:
+    matchLabels: {app: llm-eval-api}
+  template:
+    metadata:
+      labels: {app: llm-eval-api}
+    spec:
+      containers:
+      - name: api
+        image: llm-eval-platform:latest
+        ports: [{containerPort: 8080}]
+        env:
+        - name: ANTHROPIC_API_KEY
+          valueFrom:
+            secretKeyRef: {name: llm-eval-secrets, key: anthropic-api-key}
+        - name: REDIS_URL
+          value: "redis://redis-service:6379/0"
+        resources:
+          requests: {memory: "512Mi", cpu: "250m"}
+          limits: {memory: "2Gi", cpu: "1000m"}
+        livenessProbe:
+          httpGet: {path: /health, port: 8080}
+          initialDelaySeconds: 10
+          periodSeconds: 30
+        readinessProbe:
+          httpGet: {path: /health, port: 8080}
+          initialDelaySeconds: 5
+          periodSeconds: 10
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: llm-eval-api-service
+spec:
+  selector: {app: llm-eval-api}
+  ports: [{protocol: TCP, port: 80, targetPort: 8080}]
+  type: LoadBalancer
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: llm-eval-worker
+spec:
+  replicas: 3
+  selector:
+    matchLabels: {app: llm-eval-worker}
+  template:
+    metadata:
+      labels: {app: llm-eval-worker}
+    spec:
+      containers:
+      - name: worker
+        image: llm-eval-platform:latest
+        command: ["celery", "-A", "workers.distributed", "worker", "--loglevel=info"]
+        env:
+        - name: ANTHROPIC_API_KEY
+          valueFrom:
+            secretKeyRef: {name: llm-eval-secrets, key: anthropic-api-key}
+        - name: REDIS_URL
+          value: "redis://redis-service:6379/0"
+        resources:
+          requests: {memory: "256Mi", cpu: "125m"}
+          limits: {memory: "1Gi", cpu: "500m"}
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: llm-eval-worker-hpa
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: llm-eval-worker
+  minReplicas: 1
+  maxReplicas: 10
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target: {type: Utilization, averageUtilization: 70}
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: llm-eval-secrets
+type: Opaque
+stringData:
+  anthropic-api-key: "your-key-here"
